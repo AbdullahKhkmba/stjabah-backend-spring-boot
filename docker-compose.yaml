@@ -1,0 +1,15 @@
+services:
+  postgres:
+    image: postgis/postgis:15-3.3
+    container_name: stjabah-postgres
+    environment:
+      POSTGRES_DB: stjabah_db
+      POSTGRES_USER: abdullah
+      POSTGRES_PASSWORD: khkmba02
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:
