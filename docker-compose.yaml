@@ -1,15 +1,53 @@
 services:
-  postgres:
-    image: postgis/postgis:15-3.3
-    container_name: stjabah-postgres
+  postgis:
+    image: postgis/postgis:16-3.4
+    container_name: stjabah-postgis
     environment:
       POSTGRES_DB: stjabah_db
-      POSTGRES_USER: abdullah
-      POSTGRES_PASSWORD: khkmba02
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: secret
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgis_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stjabah"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  tileserver:
+    image: maptiler/tileserver-gl:latest
+    container_name: stjabah-tileserver
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./tiles:/data
+
+  valhalla:
+    image: ghcr.io/gis-ops/docker-valhalla/valhalla:latest
+    container_name: stjabah-valhalla
+    ports:
+      - "8002:8002"
+    volumes:
+      - ./valhalla/custom_files:/custom_files
+      - valhalla_tiles:/valhalla/tiles
+
+  backend:
+    build: .
+    container_name: stjabah-backend
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgis:5432/stjabah_db
+      SPRING_DATASOURCE_USERNAME: admin
+      SPRING_DATASOURCE_PASSWORD: secret
+      TILESERVER_BASE_URL: http://tileserver:8080
+      VALHALLA_BASE_URL: http://valhalla:8002
+    ports:
+      - "8081:8081"
+    depends_on:
+      postgis:
+        condition: service_healthy
 
 volumes:
-  postgres_data:
+  postgis_data:
+  valhalla_tiles:
