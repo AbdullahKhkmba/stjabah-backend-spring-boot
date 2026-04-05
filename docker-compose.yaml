@@ -1,6 +1,7 @@
 services:
   postgis:
-    image: postgis/postgis:16-3.4
+    image: kartoza/postgis:16-3.4
+    platform: linux/arm64
     container_name: stjabah-postgis
     environment:
       POSTGRES_DB: stjabah_db
@@ -11,16 +12,25 @@ services:
     volumes:
       - postgis_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U stjabah"]
+      test: ["CMD-SHELL", "pg_isready -U admin"]
       interval: 10s
       timeout: 5s
       retries: 5
+
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: pgadmin
+    ports:
+      - 80:80
+    environment:
+      PGADMIN_DEFAULT_EMAIL: stjabah@customsolutions.com
+      PGADMIN_DEFAULT_PASSWORD: secret
 
   tileserver:
     image: maptiler/tileserver-gl:latest
     container_name: stjabah-tileserver
     ports:
-      - "8080:8080"
+      - "8081:8081"
     volumes:
       - ./tiles:/data
 
@@ -43,7 +53,7 @@ services:
       TILESERVER_BASE_URL: http://tileserver:8080
       VALHALLA_BASE_URL: http://valhalla:8002
     ports:
-      - "8081:8081"
+      - "8080:8080"
     depends_on:
       postgis:
         condition: service_healthy

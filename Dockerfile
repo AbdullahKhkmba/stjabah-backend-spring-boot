@@ -15,7 +15,7 @@ RUN mvn dependency:go-offline -q
 COPY src ./src
 
 # Build the project into a .jar file inside /target and skip running tests despite compiling them
-RUN mvn package -Dskiptests -q
+RUN mvn package -DskipTests -q
 
 #------------------ Stage 2: Run ---------------------------
 # Another base image which is the actual image that will be exported
