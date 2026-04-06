@@ -32,3 +32,12 @@ Now you can use the dashboard to track the application database.
 | Backend API | http://localhost:8080                 |
 | Swagger UI  | http://localhost:8080/swagger-ui.html |
 | pgAdmin     | http://localhost                      |
+
+## Incident Status
+Incident has 6 status each represent a different state as follows:
+1. `CREATED` → CR operator creates incident
+2. `DISPATCHED` → CR operator dispatches to units
+3. `ACKNOWLEDGED` → at least one unit responds via the ERT app
+4. `RESPONDING` → at least one unit marks arrival on site via the ERT app
+5. `RESOLVED` → all assigned units mark resolved via the ERT app
+6. `CLOSED` → CR operator explicitly closes
