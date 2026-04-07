@@ -24,7 +24,7 @@ public class Incident {
     private Point location;
 
     @Enumerated(EnumType.STRING)
-    @Column(name="status")
+    @Column(name="status", nullable=false)
     private IncidentStatus status;
 
     @Column(name="created_at", nullable = false, updatable = false)
@@ -37,4 +37,6 @@ public class Incident {
     private void onCreate(){
         this.createdAt = LocalDateTime.now();
     }
+
+
 }
