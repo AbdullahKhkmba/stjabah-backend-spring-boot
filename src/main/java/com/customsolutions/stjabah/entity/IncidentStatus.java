@@ -4,7 +4,7 @@ public enum IncidentStatus{
     CREATED,
     DISPATCHED,
     ACKNOWLEDGED,
-    IN_PROGRESS,
+    RESPONDING,
     RESOLVED,
     CANCELLED,
     CLOSED

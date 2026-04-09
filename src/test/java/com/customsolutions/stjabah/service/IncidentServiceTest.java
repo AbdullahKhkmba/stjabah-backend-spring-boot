@@ -1,12 +1,17 @@
 package com.customsolutions.stjabah.service;
 
+import com.customsolutions.stjabah.communication.CommunicationGateway;
 import com.customsolutions.stjabah.entity.Incident;
 import com.customsolutions.stjabah.entity.IncidentStatus;
 import com.customsolutions.stjabah.exception.IllegalLocationUpdateException;
 import com.customsolutions.stjabah.exception.IncidentNotFoundException;
+import com.customsolutions.stjabah.exception.InvalidIncidentStatusTransitionException;
+import com.customsolutions.stjabah.exception.InvalidStatusForDispatchException;
 import com.customsolutions.stjabah.repository.IncidentRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.locationtech.jts.geom.Coordinate;
 import org.locationtech.jts.geom.GeometryFactory;
 import org.locationtech.jts.geom.Point;
@@ -25,6 +30,9 @@ public class IncidentServiceTest {
     @Mock
     private IncidentRepository incidentRepository;
 
+    @Mock
+    private CommunicationGateway communicationGateway;
+
     @Spy
     @InjectMocks
     private IncidentService incidentService;
@@ -38,7 +46,7 @@ public class IncidentServiceTest {
     void createIncident_validInput_returnIncidentWithCorrectValues(){
         incidentService.createIncident("Fire at sector 4", 30.0, 31.1);
 
-        verify(incidentRepository, times(1)).save(incidentCaptor.capture());
+        verify(incidentRepository).save(incidentCaptor.capture());
 
         Incident savedIncident = incidentCaptor.getValue();
 
@@ -61,11 +69,11 @@ public class IncidentServiceTest {
 
         // Assert
         assertSame(repoIncident, serviceIncident);
-        verify(incidentRepository, times(1)).findById(incidentId);
+        verify(incidentRepository).findById(incidentId);
     }
 
     @Test
-    void getIncidentById_nonExistingId_ThrowIncidentNotFoundException(){
+    void getIncidentById_nonExistingId_ThrowIncidentNotFound(){
         // Arrange
         Long incidentId = 100L;
         when(incidentRepository.findById(incidentId)).thenReturn(Optional.empty());
@@ -93,7 +101,7 @@ public class IncidentServiceTest {
         assertEquals(3, returnedList.size());
         assertEquals(incidentList, returnedList);
 
-        verify(incidentRepository, times(1)).findAll();
+        verify(incidentRepository).findAll();
     }
 
     @Test
@@ -106,7 +114,7 @@ public class IncidentServiceTest {
         Optional<Incident> serviceReturn = incidentService.getActiveIncident();
 
         // Assert
-        verify(incidentRepository, times(1)).findFirstByStatusNotIn(statusList);
+        verify(incidentRepository).findFirstByStatusNotIn(statusList);
         assertTrue(serviceReturn.isPresent());
     }
 
@@ -120,12 +128,12 @@ public class IncidentServiceTest {
         Optional<Incident> serviceReturn = incidentService.getActiveIncident();
 
         // Assert
-        verify(incidentRepository, times(1)).findFirstByStatusNotIn(statusList);
+        verify(incidentRepository).findFirstByStatusNotIn(statusList);
         assertTrue(serviceReturn.isEmpty());
     }
 
     @Test
-    void updateIncidentLocation_nonExistingIncident_shouldThrowIncidentNotFoundException(){
+    void updateIncidentLocation_nonExistingIncident_shouldThrowIncidentNotFound(){
         // Arrange
         when(incidentRepository.findById(any())).thenReturn(Optional.empty());
 
@@ -134,11 +142,11 @@ public class IncidentServiceTest {
             incidentService.updateIncidentLocation(100L, 123.4, 567.8);
         });
 
-        verify(incidentRepository, times(1)).findById(any());
+        verify(incidentRepository).findById(any());
     }
 
     @Test
-    void updateIncidentLocation_notCreatedStatus_shouldThrowIllegalLocationUpdateException(){
+    void updateIncidentLocation_notCreatedStatus_shouldThrowIllegalLocationUpdate(){
         // Arrange
         Incident incident = new Incident();
         incident.setStatus(IncidentStatus.DISPATCHED);
@@ -149,7 +157,7 @@ public class IncidentServiceTest {
             incidentService.updateIncidentLocation(100L, 123.4, 567.8);
         });
 
-        verify(incidentRepository, times(1)).findById(any());
+        verify(incidentRepository).findById(any());
     }
 
     @Test
@@ -166,11 +174,148 @@ public class IncidentServiceTest {
 
         // Act
         incidentService.updateIncidentLocation(10L, 123.4, 567.8);
-        verify(incidentRepository, times(1)).save(incidentCaptor.capture());
-        Incident modifiedIncident = incidentCaptor.getValue();
 
         // Assert
+        verify(incidentRepository).save(incidentCaptor.capture());
+
+        Incident modifiedIncident = incidentCaptor.getValue();
+
         assertEquals(567.8, modifiedIncident.getLocation().getX());
         assertEquals(123.4, modifiedIncident.getLocation().getY());
+    }
+
+    @ParameterizedTest
+    @EnumSource(value=IncidentStatus.class, names={"CANCELLED", "CLOSED"})
+    void cancelIncident_invalidStatus_shouldThrowInvalidIncidentStatusTransition(IncidentStatus status){
+        // Arrange
+        Long id = 1L;
+        Incident incident = new Incident();
+        incident.setStatus(status);
+        when(incidentRepository.findById(id)).thenReturn(Optional.of(incident));
+
+        // Act & Assert
+        assertThrows(InvalidIncidentStatusTransitionException.class, ()->{
+            incidentService.cancelIncident(id);
+        });
+
+        verify(communicationGateway, never()).broadcast(any(), any());
+        verify(incidentRepository, never()).save(any());
+    }
+
+    @ParameterizedTest
+    @EnumSource(value=IncidentStatus.class, names={"DISPATCHED", "ACKNOWLEDGED", "RESPONDING", "RESOLVED"})
+    void cancelIncident_afterDispatch_shouldUpdateStatusAndBroadcast(IncidentStatus status){
+        // Arrange
+        Long id = 1L;
+        Incident stubIncident = new Incident();
+        stubIncident.setStatus(status);
+        when(incidentRepository.findById(id)).thenReturn(Optional.of(stubIncident));
+
+        // Act
+        incidentService.cancelIncident(id);
+
+        // Assert
+        verify(communicationGateway).broadcast(any(), any());
+        verify(incidentRepository).save(incidentCaptor.capture());
+
+        Incident serviceIncident = incidentCaptor.getValue();
+
+        assertEquals(IncidentStatus.CANCELLED, serviceIncident.getStatus());
+        assertNotNull(serviceIncident.getClosedAt());
+    }
+
+    @Test
+    void cancelIncident_createdState_shouldNotBroadcast(){
+        // Arrange
+        Long id = 1L;
+        Incident stubIncident = new Incident();
+        stubIncident.setStatus(IncidentStatus.CREATED);
+        when(incidentRepository.findById(id)).thenReturn(Optional.of(stubIncident));
+
+        // Act
+        incidentService.cancelIncident(id);
+
+        // Assert
+        verify(communicationGateway, never()).broadcast(any(), any());
+        verify(incidentRepository).save(any());
+    }
+
+    @ParameterizedTest
+    @EnumSource(value=IncidentStatus.class,
+            names={"DISPATCHED", "ACKNOWLEDGED", "RESPONDING", "RESOLVED", "CLOSED", "CANCELLED"})
+    void dispatchIncident_invalidStatus_shouldThrowInvalidStatusForDispatch(IncidentStatus status){
+        // Arrange
+        Long id = 1L;
+        Incident stubIncident = new Incident();
+        stubIncident.setStatus(status);
+        when(incidentRepository.findById(id)).thenReturn(Optional.of(stubIncident));
+
+        // Act & Assert
+        assertThrows(InvalidStatusForDispatchException.class, ()->{
+            incidentService.dispatchIncident(id);
+        });
+
+        verify(communicationGateway, never()).broadcast(any(), any());
+        verify(incidentRepository, never()).save(any());
+    }
+
+    @Test
+    void dispatchIncident_createdState_shouldUpdateStatusAndBroadcast(){
+        // Arrange
+        Long id = 1L;
+        Incident stubIncident = new Incident();
+        stubIncident.setStatus(IncidentStatus.CREATED);
+        when(incidentRepository.findById(id)).thenReturn(Optional.of(stubIncident));
+
+        // Act
+        incidentService.dispatchIncident(id);
+
+        // Assert
+        verify(communicationGateway).broadcast(any(), any());
+        verify(incidentRepository).save(incidentCaptor.capture());
+
+        Incident serviceIncident = incidentCaptor.getValue();
+
+        assertEquals(IncidentStatus.DISPATCHED, serviceIncident.getStatus());
+    }
+
+    @ParameterizedTest
+    @EnumSource(value=IncidentStatus.class,
+            names={"CREATED", "DISPATCHED", "ACKNOWLEDGED", "RESPONDING", "CLOSED", "CANCELLED"})
+    void closeIncident_invalidStatus_shouldThrowInvalidIncidentStatusTransition(IncidentStatus status){
+        // Arrange
+        Long id = 1L;
+        Incident incident = new Incident();
+        incident.setStatus(status);
+        when(incidentRepository.findById(id)).thenReturn(Optional.of(incident));
+
+        // Act & Assert
+        assertThrows(InvalidIncidentStatusTransitionException.class, ()->{
+            incidentService.closeIncident(id);
+        });
+
+        verify(communicationGateway, never()).broadcast(any(), any());
+        verify(incidentRepository, never()).save(any());
+    }
+
+    @Test
+    void closeIncident_statusResolved_shouldUpdateStatusAndBroadcast(){
+        // Arrange
+        Long id = 1L;
+        Incident stubIncident = new Incident();
+        stubIncident.setStatus(IncidentStatus.RESOLVED);
+        when(incidentRepository.findById(id)).thenReturn(Optional.of(stubIncident));
+
+        // Act
+        incidentService.closeIncident(id);
+
+        // Assert
+        verify(communicationGateway).broadcast(any(), any());
+        verify(incidentRepository).save(incidentCaptor.capture());
+
+        Incident serviceIncident = incidentCaptor.getValue();
+
+        assertEquals(IncidentStatus.CLOSED, serviceIncident.getStatus());
+        assertNotNull(serviceIncident.getClosedAt());
     }
 }
